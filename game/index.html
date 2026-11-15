@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DUSTLINE — Tactical FPS</title>
+<style>
+  :root {
+    --canvas: #171209;
+    --surface: #2b2118;
+    --hairline: #54432c;
+    --ink: #f2e8d5;
+    --muted: #a3906f;
+    --accent: #e07830;
+    --foe: #c94f42;
+    --ally: #4fae8d;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: var(--canvas); }
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--ink); }
+  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair; }
+
+  #hud { position: fixed; inset: 0; pointer-events: none; user-select: none; }
+
+  /* Top bar: timer, score, alive counts. */
+  #topbar { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); text-align: center; }
+  #timerText { font-size: 28px; font-weight: 800; letter-spacing: 2px; text-shadow: 0 2px 8px rgba(0,0,0,.7); }
+  #scoreText { font-size: 15px; font-weight: 700; letter-spacing: 3px; color: var(--accent); text-shadow: 0 2px 6px rgba(0,0,0,.7); }
+  #aliveText { font-size: 11px; letter-spacing: 2px; color: var(--muted); text-shadow: 0 1px 4px rgba(0,0,0,.8); }
+
+  /* Spike status, top left. */
+  #spikeText { position: absolute; top: 16px; left: 18px; font-size: 12px; font-weight: 700; letter-spacing: 1.5px; text-shadow: 0 1px 4px rgba(0,0,0,.8); }
+  #spikeText.planted { color: var(--foe); }
+  #spikeText.carry { color: var(--accent); }
+  #spikeText.dropped { color: var(--muted); }
+
+  /* Kill feed, top right. */
+  #feed { position: absolute; top: 16px; right: 18px; text-align: right; font-size: 12px; line-height: 1.7; color: var(--ink); text-shadow: 0 1px 4px rgba(0,0,0,.8); }
+
+  /* Bottom left: health and armor. */
+  #vitals { position: absolute; left: 18px; bottom: 18px; width: 260px; }
+  .bar-label { font-size: 11px; letter-spacing: 2px; color: var(--muted); margin-bottom: 3px; display: flex; justify-content: space-between; }
+  .bar { height: 10px; background: rgba(0,0,0,.55); border: 1px solid var(--hairline); margin-bottom: 8px; }
+  .bar > div { height: 100%; transition: width .15s ease-out; }
+  #healthBar { background: var(--ally); }
+  #armorBar { background: #7a9cc6; }
+  #healthText { color: var(--ink); }
+
+  /* Bottom right: weapon, ammo, money. */
+  #loadout { position: absolute; right: 18px; bottom: 18px; text-align: right; text-shadow: 0 2px 6px rgba(0,0,0,.8); }
+  #weaponText { font-size: 13px; letter-spacing: 2px; color: var(--muted); }
+  #ammoText { font-size: 34px; font-weight: 800; line-height: 1; }
+  #moneyText { font-size: 18px; font-weight: 700; color: var(--accent); }
+  #grenadeText { font-size: 12px; letter-spacing: 1px; color: var(--muted); }
+  #spikeCarry { display: inline-block; margin-top: 4px; padding: 2px 8px; font-size: 11px; font-weight: 800; letter-spacing: 2px; color: #171209; background: var(--accent); }
+  #spikeCarry:empty { display: none; }
+
+  /* Crosshair: four lines whose gap follows the weapon spread. */
+  #crosshair { position: absolute; left: 50%; top: 50%; width: 0; height: 0; --gap: 8px; }
+  #crosshair::before, #crosshair::after { content: ""; position: absolute; background: var(--ink); box-shadow: 0 0 3px rgba(0,0,0,.9); }
+  #crosshair::before { left: calc(-1px); top: calc(-1 * var(--gap) - 7px); width: 2px; height: 7px; box-shadow: 0 0 3px rgba(0,0,0,.9), 0 calc(2 * var(--gap) + 7px) 0 var(--ink); }
+  #crosshair::after { top: calc(-1px); left: calc(-1 * var(--gap) - 7px); height: 2px; width: 7px; box-shadow: 0 0 3px rgba(0,0,0,.9), calc(2 * var(--gap) + 7px) 0 0 var(--ink); }
+  #crosshair .dot { position: absolute; left: -1px; top: -1px; width: 2px; height: 2px; background: var(--ink); }
+
+  #hitmarker { position: absolute; left: 50%; top: 50%; width: 26px; height: 26px; margin: -13px 0 0 -13px; opacity: 0; }
+  #hitmarker.show { opacity: 1; }
+  #hitmarker::before, #hitmarker::after { content: ""; position: absolute; left: 12px; top: 0; width: 2px; height: 26px; background: var(--ink); }
+  #hitmarker::before { transform: rotate(45deg); }
+  #hitmarker::after { transform: rotate(-45deg); }
+  #hitmarker.kill::before, #hitmarker.kill::after { background: var(--foe); }
+
+  /* Damage vignette. */
+  #damageFlash { position: absolute; inset: 0; pointer-events: none; opacity: 0; background: radial-gradient(ellipse at center, transparent 55%, rgba(201,79,66,.55) 100%); }
+  #damageFlash.flash { animation: dmg .45s ease-out; }
+  @keyframes dmg { 0% { opacity: 1; } 100% { opacity: 0; } }
+
+  /* Buy menu. */
+  #buyMenu { position: absolute; left: 18px; top: 50%; transform: translateY(-50%); width: 340px; background: rgba(23,18,9,.88); border: 1px solid var(--hairline); padding: 14px 16px; display: none; }
+  #buyMenu.show { display: block; }
+  #buyMenu h2 { font-size: 13px; letter-spacing: 3px; color: var(--accent); margin-bottom: 10px; }
+  .buy-row { display: flex; gap: 10px; align-items: baseline; font-size: 13px; padding: 4px 0; border-bottom: 1px solid rgba(84,67,44,.4); }
+  .buy-row.cant { opacity: .45; }
+  .buy-key { display: inline-block; min-width: 20px; text-align: center; border: 1px solid var(--hairline); padding: 1px 4px; font-size: 11px; color: var(--muted); }
+  .buy-name { flex: 1; }
+  .buy-own { font-size: 10px; letter-spacing: 1px; color: var(--ally); }
+  .buy-price { color: var(--accent); font-weight: 700; }
+
+  /* Plant / defuse channel. */
+  #channelWrap { position: absolute; left: 50%; bottom: 22%; transform: translateX(-50%); width: 280px; text-align: center; display: none; }
+  #channelWrap.show { display: block; }
+  #channelLabel { font-size: 12px; letter-spacing: 2px; margin-bottom: 6px; text-shadow: 0 1px 4px rgba(0,0,0,.8); }
+  #channelWrap .bar { height: 8px; }
+  #channelFill { height: 100%; background: var(--accent); width: 0; }
+
+  /* Round banner. */
+  #banner { position: absolute; left: 50%; top: 26%; transform: translateX(-50%); font-size: 44px; font-weight: 900; letter-spacing: 8px; color: var(--ink); text-shadow: 0 4px 18px rgba(0,0,0,.8); opacity: 0; transition: opacity .3s; text-align: center; white-space: nowrap; }
+  #banner.show { opacity: 1; }
+
+  /* Hint line. */
+  #hintText { position: absolute; left: 50%; bottom: 96px; transform: translateX(-50%); font-size: 13px; letter-spacing: 2px; color: var(--ink); text-shadow: 0 1px 4px rgba(0,0,0,.9); opacity: 0; transition: opacity .3s; white-space: nowrap; }
+  #hintText.show { opacity: 1; }
+
+  /* Start / match overlay. */
+  #overlay { position: fixed; inset: 0; background: rgba(23,18,9,.82); display: none; align-items: center; justify-content: center; pointer-events: auto; z-index: 10; }
+  #overlay.show { display: flex; }
+  #overlay .panel { text-align: center; max-width: 560px; padding: 40px; }
+  #overlayTitle { font-size: 56px; font-weight: 900; letter-spacing: 12px; color: var(--accent); margin-bottom: 12px; }
+  #overlayText { font-size: 15px; line-height: 1.7; color: var(--ink); margin-bottom: 28px; }
+  #overlayButton { pointer-events: auto; cursor: pointer; font: inherit; font-size: 15px; font-weight: 800; letter-spacing: 3px; color: #171209; background: var(--accent); border: none; padding: 14px 34px; }
+  #overlayButton:hover { filter: brightness(1.12); }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud">
+  <div id="damageFlash"></div>
+  <div id="topbar">
+    <div id="timerText">1:40</div>
+    <div id="scoreText">0 — 0</div>
+    <div id="aliveText">VANGUARD 5 · JACKAL 5</div>
+  </div>
+  <div id="spikeText">YOU CARRY THE SPIKE</div>
+  <div id="feed"></div>
+  <div id="vitals">
+    <div class="bar-label"><span>HEALTH</span><span id="healthText">100</span></div>
+    <div class="bar"><div id="healthBar" style="width:100%"></div></div>
+    <div class="bar-label"><span>ARMOR</span></div>
+    <div class="bar"><div id="armorBar" style="width:0%"></div></div>
+  </div>
+  <div id="loadout">
+    <div id="weaponText">P9 Sidearm</div>
+    <div id="ammoText">12 / 36</div>
+    <div id="moneyText">$800</div>
+    <div id="grenadeText"></div>
+    <div id="spikeCarry"></div>
+  </div>
+  <div id="crosshair"><span class="dot"></span></div>
+  <div id="hitmarker"></div>
+  <div id="buyMenu">
+    <h2>BUY MENU — PRESS 1–7</h2>
+    <div id="buyList"></div>
+  </div>
+  <div id="channelWrap">
+    <div id="channelLabel">PLANTING SPIKE…</div>
+    <div class="bar"><div id="channelFill"></div></div>
+  </div>
+  <div id="banner"></div>
+  <div id="hintText"></div>
+</div>
+<div id="overlay">
+  <div class="panel">
+    <div id="overlayTitle">DUSTLINE</div>
+    <div id="overlayText"></div>
+    <button id="overlayButton">CLICK TO PLAY</button>
+  </div>
+</div>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three/three.module.min.js" } }
+</script>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
